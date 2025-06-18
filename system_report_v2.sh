@@ -75,8 +75,7 @@ OS: $os
 Uptime: $uptime
 CPU: $cpu
 RAM: $ram
-Disk(s):
-$disks
+Disk(s):$disks
 Video: $video
 Host Address: $ipaddr
 Gateway IP: $gateway
