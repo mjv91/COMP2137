@@ -1,113 +1,135 @@
 #!/bin/bash
 
-# ---------------------------------------------------
 # COMP2137 Assignment 2
-# Author: Micheal Verconich
-# This script configures server1 for the assignment.
-# It sets up apache2 and squid, adds users with SSH keys,
-# and makes sure 'frodo' has sudo privileges and SSH access.
-# ---------------------------------------------------
+# Micheal Verconich
+# This script configures server1 for the assignment requirements.
+# It sets a static IP, installs apache2 and squid, creates users with SSH,
+# and gives frodo sudo and a public key.
 
-# ----------- Define Variables -----------
+# Define values that will be used
 STATIC_IP="192.168.16.21/24"
 NETPLAN_FILE="/etc/netplan/10-lxc.yaml"
 HOSTS_FILE="/etc/hosts"
-FRODO_KEY="ssh-ed25519 AAAAC3Nzac1LZDI1NTE5AAAAIG4rT3vTt990x5kndS4HmgTrKBT8SKzh8F example@example"
 
-# Packages we want to install
+# Public key that must be added to frodo
+FRODO_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4rT3vTt99Ox5kndS4HmgTrKBT8SKzhK4rhGkEVGlCI student@generic-vm"
+
+# Packages that need to be installed
 NEEDED_PACKAGE_1="apache2"
 NEEDED_PACKAGE_2="squid"
 
-# User list
+# Users to create
 USER1="frodo"
-USER2="perrier"
-USER3="cindy"
-USER4="tiger"
-USER5="yoda"
+USER2="aubrey"
+USER3="captain"
+USER4="snibbles"
+USER5="brownie"
+USER6="scooter"
+USER7="sandy"
+USER8="perrier"
+USER9="cindy"
+USER10="tiger"
+USER11="yoda"
 
-# ----------- Check for Root -----------
-# This part ensures the script is being run with root permissions
+# Make sure script is run as root
 if [ "$(id -u)" != "0" ]; then
-  echo "Please run this script as root."
-  exit 1
+    echo "Please run this script as root."
+    exit 1
 fi
 
-echo "Starting system configuration..."
-echo "----------------------------------"
+echo "Starting setup..."
 
-# ----------- Network Setup Note -----------
-# DO NOT automate YAML file edits with sed; it breaks indentation.
-# We'll just notify the user to manually ensure it's correct.
-
-echo "NOTE: Ensure the static IP $STATIC_IP is manually set in $NETPLAN_FILE"
-echo "If you've updated it, run: sudo netplan apply"
-echo
-
-# ----------- Hosts File Update -----------
-# Add a line for server1 if it’s not already in /etc/hosts
-grep -q "server1" "$HOSTS_FILE"
+# ----------- Network Setup ------------
+# Check if the static IP is already in the netplan file
+grep "$STATIC_IP" "$NETPLAN_FILE" > /dev/null
 if [ $? -ne 0 ]; then
-  echo "192.168.16.21 server1" >> "$HOSTS_FILE"
-  echo "server1 added to $HOSTS_FILE"
+    sed -i "/addresses:/c\        addresses: [$STATIC_IP]" "$NETPLAN_FILE"
+    echo "Netplan updated with $STATIC_IP"
+    netplan apply
 else
-  echo "server1 already exists in $HOSTS_FILE"
+    echo "Static IP already set in netplan."
 fi
 
-# ----------- Install Packages -----------
-# This checks and installs packages one by one
-if ! dpkg -l | grep -q "$NEEDED_PACKAGE_1"; then
-  echo "Installing $NEEDED_PACKAGE_1..."
-  apt update -y
-  apt install -y "$NEEDED_PACKAGE_1"
+# Update /etc/hosts for server1 entry
+grep "server1" "$HOSTS_FILE" > /dev/null
+if [ $? -eq 0 ]; then
+    sed -i "/server1/ s/.*/192.168.16.21 server1/" "$HOSTS_FILE"
+    echo "/etc/hosts entry updated for server1."
 else
-  echo "$NEEDED_PACKAGE_1 is already installed."
+    echo "192.168.16.21 server1" >> "$HOSTS_FILE"
+    echo "server1 added to /etc/hosts."
 fi
 
-if ! dpkg -l | grep -q "$NEEDED_PACKAGE_2"; then
-  echo "Installing $NEEDED_PACKAGE_2..."
-  apt install -y "$NEEDED_PACKAGE_2"
+# ----------- Software Installation ------------
+# Install apache2 if not already there
+dpkg -l | grep "$NEEDED_PACKAGE_1" > /dev/null
+if [ $? -ne 0 ]; then
+    apt update -qq
+    apt install -y "$NEEDED_PACKAGE_1"
+    echo "apache2 installed."
 else
-  echo "$NEEDED_PACKAGE_2 is already installed."
+    echo "apache2 already installed."
 fi
 
-# ----------- Create Users -----------
-# This creates users if they don't already exist
-for USER in $USER1 $USER2 $USER3 $USER4 $USER5; do
-  if id "$USER" &>/dev/null; then
-    echo "User $USER already exists."
-  else
-    useradd -m -s /bin/bash "$USER"
-    echo "User $USER created."
-  fi
-
-  # Set default password (not secure in real world)
-  echo "$USER:changeme" | chpasswd
-
-  # Force password change on next login
-  chage -d 0 "$USER"
-done
-
-# ----------- SSH Key for Frodo -----------
-# Create .ssh directory and authorized_keys file
-FRODO_HOME="/home/$USER1"
-FRODO_SSH="$FRODO_HOME/.ssh"
-
-if [ ! -d "$FRODO_SSH" ]; then
-  mkdir -p "$FRODO_SSH"
-  chown "$USER1:$USER1" "$FRODO_SSH"
-  chmod 700 "$FRODO_SSH"
-  echo "SSH folder created for $USER1"
+# Install squid if not already there
+dpkg -l | grep "$NEEDED_PACKAGE_2" > /dev/null
+if [ $? -ne 0 ]; then
+    apt install -y "$NEEDED_PACKAGE_2"
+    echo "squid installed."
+else
+    echo "squid already installed."
 fi
 
-echo "$FRODO_KEY" > "$FRODO_SSH/authorized_keys"
-chown "$USER1:$USER1" "$FRODO_SSH/authorized_keys"
-chmod 600 "$FRODO_SSH/authorized_keys"
-echo "SSH key added for $USER1"
+# ----------- User Account Creation ------------
+# Create a function so we don’t repeat code for each user
+create_user_and_ssh() {
+    USERNAME=$1
+    if id "$USERNAME" > /dev/null 2>&1; then
+        echo "User $USERNAME already exists."
+    else
+        useradd -m -s /bin/bash "$USERNAME"
+        echo "User $USERNAME created."
+    fi
 
-# ----------- Add Frodo to Sudo -----------
-usermod -aG sudo "$USER1"
-echo "$USER1 has been added to sudo group."
+    SSH_DIR="/home/$USERNAME/.ssh"
+    mkdir -p "$SSH_DIR"
+    chown "$USERNAME:$USERNAME" "$SSH_DIR"
+    chmod 700 "$SSH_DIR"
 
-# ----------- Done! -----------
-echo "Configuration complete!"
+    if [ ! -f "$SSH_DIR/id_rsa.pub" ]; then
+        sudo -u "$USERNAME" ssh-keygen -t rsa -N "" -f "$SSH_DIR/id_rsa"
+        echo "RSA key generated for $USERNAME"
+    fi
 
+    if [ ! -f "$SSH_DIR/id_ed25519.pub" ]; then
+        sudo -u "$USERNAME" ssh-keygen -t ed25519 -N "" -f "$SSH_DIR/id_ed25519"
+        echo "ED25519 key generated for $USERNAME"
+    fi
+
+    cat "$SSH_DIR/id_rsa.pub" "$SSH_DIR/id_ed25519.pub" > "$SSH_DIR/authorized_keys"
+
+    if [ "$USERNAME" = "frodo" ]; then
+        echo "$FRODO_KEY" >> "$SSH_DIR/authorized_keys"
+        usermod -aG sudo frodo
+        echo "Added public key and sudo access for frodo."
+    fi
+
+    chown "$USERNAME:$USERNAME" "$SSH_DIR/authorized_keys"
+    chmod 600 "$SSH_DIR/authorized_keys"
+}
+
+# Now call the function for each user
+create_user_and_ssh "$USER1"
+create_user_and_ssh "$USER2"
+create_user_and_ssh "$USER3"
+create_user_and_ssh "$USER4"
+create_user_and_ssh "$USER5"
+create_user_and_ssh "$USER6"
+create_user_and_ssh "$USER7"
+create_user_and_ssh "$USER8"
+create_user_and_ssh "$USER9"
+create_user_and_ssh "$USER10"
+create_user_and_ssh "$USER11"
+
+# Final message
+echo "All tasks completed. Script finished."
